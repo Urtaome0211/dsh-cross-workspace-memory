@@ -3,7 +3,7 @@
  * 重点守住三条：确定性索引、中文检索、去重与裁剪。
  */
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
@@ -162,7 +162,25 @@ test('多实例：refresh 合并外部新增且保留本地更新的同 id 条�
 
   assert.equal(a.refresh(), true)
   assert.equal(a.items.length, 2)
-  assert.equal(a.refresh(), false) // mtime 没变 → 不重复合并
+  assert.equal(a.refresh(), false) // 内容没变 → 不重复合并
+})
+
+test('多实例：mtime 没变也要能发现变化（CI/网络盘时间戳分辨率不足）', () => {
+  const dir = mkdtempSync(join(TMP, 'case-'))
+  const a = new MemoryStore(dir)
+  a.upsert({ kind: 'fact', text: 'A 写的' })
+  a.save()
+
+  const b = new MemoryStore(dir)
+  b.upsert({ kind: 'fact', text: 'B 写的' })
+  b.save()
+
+  // 把 mtime 拨回 A 记下的那个值 —— 旧实现（只比 mtime）会在这里误判「没变」
+  const t = a.mtime / 1000
+  utimesSync(a.file, t, t)
+
+  assert.equal(a.refresh(), true)
+  assert.equal(a.items.length, 2)
 })
 
 test('行文格式：带类别中文标签与日期', () => {
