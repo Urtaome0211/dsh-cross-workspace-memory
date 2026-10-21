@@ -1,5 +1,10 @@
 # dsh-cross-workspace-memory · 跨工作区长期记忆
 
+[![CI](https://github.com/Urtaome0211/dsh-cross-workspace-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/Urtaome0211/dsh-cross-workspace-memory/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![node](https://img.shields.io/badge/node-%E2%89%A522.19-brightgreen.svg)](./package.json)
+[![deps](https://img.shields.io/badge/dependencies-0-success.svg)](./package.json)
+
 > 换一个工作区，不用再从零介绍一遍自己。
 
 `dsh-cross-workspace-memory` 给 DeepSeek Harness 加一层**本机共享**的长期记忆：偏好、事实、项目档案（路径 / 命令 / 约定）、决策理由（选 A 不选 B 及当时的约束）、上次做到哪。所有工作区共用一份存储，条目带项目标签，检索时优先本工作区。
@@ -196,3 +201,18 @@ node test/store.test.mjs      # 15 个用例，约 100ms
 ## 八、延伸阅读
 
 - [给 DeepSeek Harness 做一层跨工作区记忆](./docs/blog-cross-workspace-memory.md) —— 完整的过程记录：怎么用会话日志证伪「换工作区就丢缓存」、注入位置为什么决定生死、6 个踩过的坑、以及发布时撞的三个钉子。
+
+---
+
+## 九、许可
+
+[MIT](./LICENSE) © 2026 fhz11
+
+选它的理由很实际：这是个零依赖、几十 KB 的小工具，MIT 是 DSH 插件生态里最常见、也最不给人添麻烦的选择——随便商用、随便改、闭源再分发都行，只要保留版权声明；真有人想把它并进 GPL 项目，也仍然兼容。如果要拿去做什么，不用先问我。
+
+## 十、贡献
+
+欢迎提 issue 和 PR。两条硬约束请先看一眼，它们不是风格偏好，是设计的根：
+
+1. **不许把注入挪到系统提示词或用户消息前**——前缀一变，prompt 缓存全废，插件存在的意义就没了。
+2. **注入文本必须逐字节确定**（绝对日期、稳定排序、排除本会话自己写的内容）。这条靠单测兜着：`test/store.test.mjs` 里有「两次渲染完全相同」和「不含相对时间措辞」两个用例，改 `renderIndex` 时它们会先叫。
