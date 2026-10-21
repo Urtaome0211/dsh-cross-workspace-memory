@@ -1,0 +1,7 @@
+# 统一换行符：仓库内一律 LF（Windows 上也不会因为 CRLF 产生假 diff）
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.zst binary
+*.tgz binary
