@@ -33,6 +33,17 @@ test('项目键：反斜杠/尾斜杠/大小写归一', () => {
   assert.equal(projectName(''), '')
 })
 
+test('项目名：跨平台路径都能取到末段（不能依赖 path.basename）', () => {
+  // Windows 写法在 Linux 上、POSIX 写法在 Windows 上，都必须切得出来
+  assert.equal(projectName('D:\\dshproject\\plugin\\'), 'plugin')
+  assert.equal(projectName('D:/dshproject/plugin'), 'plugin')
+  assert.equal(projectName('/home/runner/work/proj'), 'proj')
+  assert.equal(projectName('/home/runner/work/proj/'), 'proj')
+  assert.equal(projectName('C:\\Users\\me\\Documents\\Game'), 'Game') // 大小写保留
+  assert.equal(projectName('单段项目名'), '单段项目名')
+  assert.equal(projectName('/'), '')
+})
+
 test('类别别名与兜底', () => {
   assert.equal(normalizeKind('偏好'), 'preference')
   assert.equal(normalizeKind('DECISION'), 'decision')
