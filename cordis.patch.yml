@@ -1,0 +1,15 @@
+# dsh-cross-workspace-memory · bundle 层（loader 条目 id 固定为 dsh-memory）
+#
+# 装法：本包作为 profile 的一个 bundle 安装后，下面这行被插进 loader 树。
+# 也可以直接手改 ~/.dsh/profiles/<profile>/cordis.patch.yml —— 两种写法等价。
+#
+# 配置项（都可省略）：
+#   dir            存储目录，默认 ~/.dsh/memory
+#   capture        是否自动记录每轮进度，默认 true
+#   maxIndexChars  会话开头注入的索引上限（字符），默认 1600
+#   keepActivities 每个项目保留几条"上次做到哪"，默认 3
+#   maxItems       总条目上限，默认 400（超了先删最老的进度条目）
+- insert:
+    - id: dsh-memory
+      name: dsh-cross-workspace-memory
+      config: {}

@@ -1,0 +1,62 @@
+{
+  "name": "dsh-cross-workspace-memory",
+  "version": "0.1.0",
+  "description": "跨工作区的长期记忆（DeepSeek Harness 插件）：会话开头注入精简索引 + memory 工具按需检索，并自动记录每轮进度。换个工作区不再从零开始。",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "memory",
+    "cross-workspace",
+    "recall"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Urtaome0211/dsh-cross-workspace-memory.git"
+  },
+  "homepage": "https://github.com/Urtaome0211/dsh-cross-workspace-memory#readme",
+  "bugs": {
+    "url": "https://github.com/Urtaome0211/dsh-cross-workspace-memory/issues"
+  },
+  "private": false,
+  "type": "module",
+  "main": "./lib/index.js",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "files": [
+    "lib",
+    "tools",
+    "test",
+    "docs",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./lib/index.js",
+    "./store": "./lib/store.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "test": "node test/store.test.mjs",
+    "probe": "node tools/session-stats.mjs"
+  }
+}
