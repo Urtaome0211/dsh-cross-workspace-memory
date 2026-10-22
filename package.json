@@ -1,7 +1,7 @@
 {
   "name": "dsh-cross-workspace-memory",
-  "version": "0.1.0",
-  "description": "跨工作区的长期记忆（DeepSeek Harness 插件）：会话开头注入精简索引 + memory 工具按需检索，并自动记录每轮进度。换个工作区不再从零开始。",
+  "version": "0.1.1",
+  "description": "Cross-workspace long-term memory for DeepSeek Harness: one machine-local store shared by every workspace, a compact index injected at session start, and a searchable tool for the details.",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -33,6 +33,7 @@
     "docs",
     "cordis.patch.yml",
     "README.md",
+    "README.zh-CN.md",
     "LICENSE"
   ],
   "exports": {

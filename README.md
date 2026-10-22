@@ -1,4 +1,4 @@
-# dsh-cross-workspace-memory · 跨工作区长期记忆
+# dsh-cross-workspace-memory
 
 [![CI](https://github.com/Urtaome0211/dsh-cross-workspace-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/Urtaome0211/dsh-cross-workspace-memory/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/dsh-cross-workspace-memory.svg)](https://www.npmjs.com/package/dsh-cross-workspace-memory)
@@ -7,38 +7,48 @@
 [![node](https://img.shields.io/badge/node-%E2%89%A522.19-brightgreen.svg)](./package.json)
 [![deps](https://img.shields.io/badge/dependencies-0-success.svg)](./package.json)
 
-> 换一个工作区，不用再从零介绍一遍自己。
+**English** · [简体中文](./README.zh-CN.md)
 
-`dsh-cross-workspace-memory` 给 DeepSeek Harness 加一层**本机共享**的长期记忆：偏好、事实、项目档案（路径 / 命令 / 约定）、决策理由（选 A 不选 B 及当时的约束）、上次做到哪。所有工作区共用一份存储，条目带项目标签，检索时优先本工作区。
+> Switching workspaces shouldn't mean introducing yourself all over again.
+
+`dsh-cross-workspace-memory` adds a **machine-local, shared** long-term memory layer to
+DeepSeek Harness: preferences, facts, project profiles (paths / commands / conventions), decision
+rationale (why A over B, under what constraint), and where you left off. Every workspace reads and
+writes the same store; entries carry a project tag, and retrieval ranks the current workspace first.
 
 ---
 
-## 一、它为什么长这样（先说一件反直觉的事）
+## 1. Why it looks like this (one counter-intuitive fact first)
 
-这个插件的起点是「换个工作区就丢记忆，缓存命不中，白花钱」。实测之后结论要分开看，而**分开看决定了插件的形状**：
+The starting point was a hunch: *"new workspace → memory lost → cache misses → wasted tokens."*
+Measurement splits that into two claims, and **the split is what shaped the plugin**:
 
-| 现象 | 实测 | 含义 |
+| Question | Measured | Consequence |
 | --- | --- | --- |
-| system prompt 跨工作区是否相同 | **相同**。里面没有工作区路径；cwd 是靠 `runtime-context` 以历史消息形式注入的，位置在用户首条消息之后 | 缓存前缀本来就是跨工作区可复用的，这部分**没有损失** |
-| 换工作区真正丢的是什么 | 对话里攒下的**知识与状态**：这次踩了什么坑、为什么这么定、改到哪了 | 这才是要补的东西 |
-| 上下文块什么时候进历史 | 宿主发现上下文文本变了，就把 `runtime-context` **再追加一条**（旧的不删）。实测 16 回合的会话：`time-context` 追加 14 次、`runtime-context` 追加 3 次 | 追加在**尾部**，前面整段的缓存照旧命中；但每追加一次，那段文本就要多付一次 |
+| Is the system prompt different across workspaces? | **No.** It contains no workspace path; the cwd arrives later as a `runtime-context` history message, after the first user message | The cached prefix is already reusable across workspaces — **nothing lost there** |
+| Then what *is* lost when you switch? | The **knowledge and state** built up in the conversation: what broke, why it was decided that way, how far you got | That is the gap worth filling |
+| When do context blocks enter history? | When the host sees the context text change, it **appends another** `runtime-context` message (nothing is deleted). In a 16-turn session: `time-context` appended 14×, `runtime-context` 3× | Appending happens at the **tail**, so prefix caching still hits — but each re-append re-pays for that text |
 
-由此得到三条设计约束，写死在 `lib/store.js` 与 `lib/index.js` 的注释里：
+Three design constraints follow, and they are written into the comments of `lib/store.js` and
+`lib/index.js`:
 
-1. **注入必须放在 prompt 尾部**（`systemPrompt.context`，order 9000，排在 `runtime-context` / `skill-catalog` / `time-context` 之后），绝不碰 system prompt 头部。
-2. **注入文本必须确定性**：同一份存储状态渲染出的字节永远相同，只允许绝对短日期（`10-19`），禁止「3 天前」「刚刚」这类会自己漂移的措辞。
-3. **注入文本在一次会话里必须基本不动**：所以自动记的进度条目里，**本会话自己刚写的那几条不进索引**（它们就在对话里，对模型零信息量，却会让文本每轮变一次），进度条目在索引里也最多占 3 行。
+1. **Injection lives at the prompt tail** (`systemPrompt.context`, order 9000 — after
+   `runtime-context` / `skill-catalog` / `time-context`). It never touches the system prompt head.
+2. **Injected text must be deterministic**: the same store state must render to the same bytes.
+   Only absolute short dates (`10-19`); never "3 days ago" or "just now", which drift on their own.
+3. **Injected text must stay stable within a session**: so progress entries *written by the current
+   session* are excluded from the index (they are already in the transcript — zero information, but
+   they would change the text every turn), and progress entries take at most 3 lines of the index.
 
-违反任意一条，插件就会变成它本来要消灭的那种浪费。
-
+Break any one of the three and the plugin becomes the very waste it exists to remove.
 
 ---
 
-## 二、三种喂回模型的方式
+## 2. Three ways memory reaches the model
 
-### 1. 会话开头：注入一份精简索引
+### 2.1 Session start: a compact index is injected
 
-一行一条，带类别、项目、日期：
+One line per entry, with kind, project and date:
 
 ```
 <memory 跨工作区记忆 · 3 条 · 本机所有工作区共享>
@@ -49,55 +59,69 @@
 提示：memory search / save / update / forget / list / diagnostics
 ```
 
-- 预算默认 1600 字符（约 600 token），超出按类别权重截断 —— `preference` > `decision` > `project` > `fact` > `todo` > `activity`。
-- **空库时整块不注入**，一个字都不花。
-- 会话中途写入的新记忆**不会**挤进当前会话的索引：本会话自己写的进度条目被排除，其余条目也是在会话开始时就渲染好的——所以要读细节还有工具。
+- Budget: 1600 characters (~600 tokens) by default; overflow is truncated by kind weight —
+  `preference` > `decision` > `project` > `fact` > `todo` > `activity`.
+- **An empty store injects nothing at all** — zero tokens.
+- Anything written *during* a session does not squeeze into the current index (see constraint 3).
+  That is what the tool is for.
 
-### 2. `memory` 工具：按需检索全文、读写
+<sub>The wrapper lines of the index are currently in Chinese; the entry lines in between are
+whatever you saved, verbatim.</sub>
 
-| 你想干什么 | 参数 |
+### 2.2 The `memory` tool: on-demand read/write
+
+| Goal | Arguments |
 | --- | --- |
-| 回忆「上次做到哪 / 当初为什么这么定」 | `{"query":"打包 为什么 用 electron"}` |
-| 记一条 | `{"text":"构建用 pnpm build；打包走 electron-builder --dir 先看结构","kind":"project"}` |
-| 改一条 | `{"id":"m3f8a1c07","text":"..."}` |
-| 删一条 | `{"action":"forget","id":"m3f8a1c07"}` |
-| 看看都有什么 | `{"action":"list","kind":"decision"}` |
-| 自检注入是否生效 | `{"action":"diagnostics"}` |
+| Recall "where did I leave off / why was it decided this way" | `{"query": "build why electron-builder"}` |
+| Save a note | `{"text": "Build with pnpm build; packaging goes through electron-builder --dir first", "kind": "project"}` |
+| Edit a note | `{"id": "m3f8a1c07", "text": "..."}` |
+| Forget a note | `{"action": "forget", "id": "m3f8a1c07"}` |
+| Browse | `{"action": "list", "kind": "decision"}` |
+| Check that injection actually works | `{"action": "diagnostics"}` |
 
-`kind` 支持英文与中文别名：`preference`/偏好、`decision`/决策、`project`/项目、`fact`/事实、`todo`/待办、`activity`/进度。
+`kind` also accepts Chinese aliases (偏好 / 决策 / 项目 / 事实 / 待办 / 进度).
 
-检索是**中文整句友好**的：英文按词切，中文按二字组，所以「打包为什么慢」能命中「打包用了 electron-builder」这类条目，不需要精确措辞。
+Search is **friendly to whole Chinese sentences**: English is split on words, Chinese on
+two-character bigrams, so "打包为什么慢" hits an entry like "打包用了 electron-builder" without
+needing the exact wording.
 
-### 3. 自动捕获：每轮结束记一条进度
+### 2.3 Auto-capture: one progress note per turn
 
-每个 turn 结束写一条 `activity`：「用户这句话的第一句」+「用了哪些工具、各几次」+「碰了哪些文件」。于是新开一个工作区，第一条索引就写着上个工作区做到哪。
+At the end of each turn an `activity` entry is written: *the first sentence of the user's request*
++ *which tools ran, how many times* + *which files were touched*. Open a new workspace and the
+first index line already says where the last one stopped.
 
-- 每个项目只保留最近 3 条（`keepActivities`），不会把索引撑爆。
-- 子代理（subagent）会话默认不记，避免噪声。
-- 落盘有 1.5 秒合并窗口（同一毫秒内多次写入只落一次）。
+- Only the latest 3 per project (`keepActivities`), so the index stays small.
+- Subagent sessions are skipped by default (noise).
+- Writes are debounced by 1.5 s (several writes in the same window land once).
 
-自动捕获记的是**「做了啥」**，不是**「学到啥」**。真正的结论（"这个 API 的返回值不是 lossless JSON"，"选了 A 因为 B 在沙箱里起不来"）请用 `memory save` 显式写 —— 这类判断只有模型自己在场时知道。
+Auto-capture records **what was done**, not **what was learned**. Real conclusions ("this API's
+return value is not lossless JSON", "chose A because B won't start inside the sandbox") must be
+written explicitly with `memory save` — only the model on the spot knows them.
 
 ---
 
-## 三、安装与卸载
+## 3. Install and uninstall
 
-三条路，target 就是一个普通的包 spec（内部走 pnpm add + 写 bundle patch）：
+Three routes; `target` is an ordinary package spec (internally `pnpm add` + a bundle patch):
 
 ```bash
-# 1) 从 npm 装（推荐，联网一条命令）
+# 1) from npm (recommended, one command)
 plugin_manager install_bundle  target = dsh-cross-workspace-memory
-# 2) tarball（不依赖 registry，适合拷给没有外网的人）
-plugin_manager install_bundle  target = D:\dshproject\plugin\dsh-cross-workspace-memory-0.1.0.tgz
-# 3) 本地目录（开发期推荐：改代码重载即生效）
+# 2) from a tarball (no registry needed — handy for offline machines)
+plugin_manager install_bundle  target = D:\dshproject\plugin\dsh-cross-workspace-memory-0.1.1.tgz
+# 3) from a local directory (best while developing: edit, reload, done)
 plugin_manager install_bundle  target = D:\dshproject\plugin
 ```
 
-> 包已发布：<https://www.npmjs.com/package/dsh-cross-workspace-memory> —— `0.1.0` · MIT · 零依赖 · 解包 84.9 kB（9 个文件）。
+> Published: <https://www.npmjs.com/package/dsh-cross-workspace-memory> — MIT, zero dependencies.
 >
-> 注意：桌面版的 `desktop` profile 归 Electron app 独占，`dsh plugin --profile desktop add …` 会被拒绝（`profile "desktop" is managed exclusively by the Electron application`），只能走 `plugin_manager`。
+> Note: the desktop app owns the `desktop` profile, so `dsh plugin --profile desktop add …` is
+> rejected (`profile "desktop" is managed exclusively by the Electron application`). Use
+> `plugin_manager` instead.
 
-装完重启一次 dsh（或新开一个会话）生效：bundle 会把下面这行插进 profile 的 loader 树（`id` 固定为 `dsh-memory`，改名也不变，方便原地升级）。
+Restart dsh once (or open a new session) for it to take effect. The bundle inserts this line into
+the profile's loader tree (the `id` stays `dsh-memory` forever, so renames upgrade in place):
 
 ```yaml
 - insert:
@@ -106,59 +130,78 @@ plugin_manager install_bundle  target = D:\dshproject\plugin
       config: {}
 ```
 
-也可以不用 bundle，直接手改 `~/.dsh/profiles/<profile>/cordis.patch.yml` 加同样一行。
+You can also skip the bundle and add that line to `~/.dsh/profiles/<profile>/cordis.patch.yml`.
 
-卸载：`plugin_manager remove_bundle  target = dsh-cross-workspace-memory`。记忆文件不会被删（在 `~/.dsh/memory/` 下，想清就自己删）。
+Uninstall: `plugin_manager remove_bundle  target = dsh-cross-workspace-memory`. Your memory file is
+**not** deleted (it lives in `~/.dsh/memory/` — remove it yourself if you want).
 
-### 为什么包名叫 `dsh-cross-workspace-memory`
+### Why the package is named `dsh-cross-workspace-memory`
 
-`dsh-memory` 这个名字在 npm 上已被占用（`bbnopromo` 于 2026-08-13 发布了同名包，用途类似：SQLite FTS5 + 三个工具 + recall 段落）。为了不撞名、能发布，本包改用现在的名字；但 **bundle 的 `id` 保持 `dsh-memory` 不变**，所以从旧名升级是原地替换，配置和记忆文件都不用动。
+The name `dsh-memory` was already taken on npm (`bbnopromo` published a package under it on
+2026-08-13 with a similar purpose: SQLite FTS5 + three tools + a recall section). To be able to
+publish at all, this package uses the current name — but **the bundle `id` stays `dsh-memory`**, so
+upgrading from the old name replaces it in place; config and memory files are untouched.
 
-### 打包与分发（维护者）
+### Packaging and distribution (maintainers)
 
 ```bash
 node test/store.test.mjs      # 17 pass / 0 fail
-npm pack                      # → dsh-cross-workspace-memory-<version>.tgz（9 个文件，约 34 kB）
-# 校验：解包后在 package/ 里再跑一次测试，确认 tarball 自包含
-tar -xzf dsh-cross-workspace-memory-0.1.0.tgz -C /tmp/x && (cd /tmp/x/package && node test/store.test.mjs)
+npm pack                      # → dsh-cross-workspace-memory-<version>.tgz
+# verify: unpack and run the tests inside package/ to prove the tarball is self-contained
+tar -xzf dsh-cross-workspace-memory-0.1.1.tgz -C /tmp/x && (cd /tmp/x/package && node test/store.test.mjs)
 
-npm publish --dry-run         # 先看清单
-npm publish                   # 本包 unscoped，默认 public；registry 为官方源
-npm view dsh-cross-workspace-memory version dist.tarball   # 发布后核对
+npm publish --dry-run         # inspect the file list first
+npm publish                   # unscoped package → public on the default registry
+npm view dsh-cross-workspace-memory version dist.tarball   # verify after publishing
 ```
 
-> **新包名第一次发布会先看到一个占位版本。** registry 会先建 `0.0.0-stage`（packument 里 `stub: true`，README 是 "Temporary package placeholder for staged publishing"），真实版本进入审核，通过后自动转正并把 `latest` 指向它。本例从 `npm publish` 到 `npm view … version` 能查到 `0.1.0` 隔了约 3 分钟，期间只看得到 `0.0.0-stage` —— 别当失败处理，更别急着改版本号重发。若长时间停在占位版，用 `npm stage list` 看有没有待批的 staged release（`npm stage view / approve / reject <stage-id>`）。
+> **A brand-new package name first shows up as a placeholder version.** The registry creates
+> `0.0.0-stage` (packument `stub: true`, README "Temporary package placeholder for staged
+> publishing"), the real version goes into review, and `latest` is repointed automatically when it
+> passes. In this project the gap between `npm publish` and `npm view … version` returning `0.1.0`
+> was about 3 minutes, during which only `0.0.0-stage` was visible — do not treat that as a failure
+> and do not bump the version and re-publish. If it sits on the placeholder for a long time, check
+> `npm stage list` for a pending staged release (`npm stage view / approve / reject <id>`).
 
-发版顺序建议：改 `package.json` 的 `version` → 更新本节数字与 CHANGELOG（如有）→ 测试 → `npm publish` → `git tag vX.Y.Z && git push --tags`。`readme` 会随包一起发布到 npm 页面，所以**先改 README 再 publish**，否则 npm 上看到的是旧文案（npm 不允许覆盖已发布版本，改文案得再发一个补丁版本）。
+Release order: bump `version` in `package.json` → update the numbers here and any CHANGELOG → test
+→ `npm publish` → `git tag vX.Y.Z && git push --tags`. The README ships with the package, so **edit
+the README before publishing**; npm never lets you overwrite a published version, so a wording fix
+means another patch release.
 
-> **2FA 会让无 TTY 的发布直接失败。** 账号开了两步验证（`auth-and-writes`）时，`npm publish` 必须过一次交互式验证：在真终端里它打印认证链接或提示输入 6 位码；在 CI / 管道里则直接报 `EOTP`，而且链接会被打码成 `***`（防泄漏），连复制出来代点都做不到。两条可行路：`npm publish --otp=<6位码>`，或者建一个**勾了 Bypass 2FA 的 granular token**（注意：classic token 自 2025-11 起已不能创建、旧 token 已全部吊销；带 bypass 的 GAT 目前仍能直接发布，npm 计划 2027-01 收回这个能力，之后应改用 trusted publishing / staged publishing）。
+> **2FA kills publishing from a non-interactive terminal.** With `auth-and-writes` enabled,
+> `npm publish` needs one interactive step: in a real terminal it prints an auth URL or asks for a
+> 6-digit code; in CI/pipes it fails with `EOTP`, and the URL is masked to `***` (anti-leak), so you
+> cannot even copy it out. Two workable routes: `npm publish --otp=<code>`, or a **granular token
+> with "Bypass 2FA" checked** (note: classic tokens can no longer be created since 2025-11 and
+> existing ones were revoked; bypass-enabled granular tokens still publish directly for now, and npm
+> plans to retire that in 2027-01 — after that, use trusted publishing / staged publishing).
 
-也能发布到 GitHub Packages（只作镜像，安装方同样需要 token）：
+GitHub Packages works as a mirror (installing from it also needs a token):
 
 ```bash
-# 包名需改为 @<github账号>/dsh-cross-workspace-memory
+# the package name must become @<github-user>/dsh-cross-workspace-memory
 npm publish --registry=https://npm.pkg.github.com
 ```
 
 ---
 
-## 四、配置项
+## 4. Configuration
 
-写在 `cordis.patch.yml` 的 `config` 里，全部可省略：
+Set in the `config` of `cordis.patch.yml`; every key is optional:
 
-| 键 | 默认 | 说明 |
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `dir` | `~/.dsh/memory` | 存储目录（`DSH_HOME` 有值时跟它走） |
-| `capture` | `true` | 是否自动记录每轮进度 |
-| `maxIndexChars` | `1600` | 会话开头注入的字符上限 |
-| `keepActivities` | `3` | 每个项目保留几条进度 |
-| `maxItems` | `400` | 总条目上限，超了先删最老的进度条目，再删低权重类别 |
+| `dir` | `~/.dsh/memory` | Store directory (follows `DSH_HOME` when set) |
+| `capture` | `true` | Auto-capture one progress note per turn |
+| `maxIndexChars` | `1600` | Character budget of the injected index |
+| `keepActivities` | `3` | Progress notes kept per project |
+| `maxItems` | `400` | Hard cap; oldest progress notes are dropped first, then low-weight kinds |
 
 ---
 
-## 五、存储格式
+## 5. Storage format
 
-单文件 `~/.dsh/memory/memory.json`：
+A single file, `~/.dsh/memory/memory.json`:
 
 ```json
 {
@@ -167,7 +210,7 @@ npm publish --registry=https://npm.pkg.github.com
     {
       "id": "m3f8a1c07",
       "kind": "decision",
-      "text": "选择 JSON 文件而非 storageDomain：它需要 zod 做值校验",
+      "text": "Chose a JSON file over storageDomain: it requires zod for value validation",
       "tags": ["dsh", "storage"],
       "project": "D:/dshproject/plugin",
       "projectName": "plugin",
@@ -179,51 +222,76 @@ npm publish --registry=https://npm.pkg.github.com
 }
 ```
 
-- 写入是 tmp + rename 的原子替换，不会写坏。
-- 文件坏了（JSON 解析失败）不会让插件崩：`loadError` 记下来，工具照常回话。
-- 多实例（同时开两个 dsh）各自持有内存副本，下次写入前先重读文件，**内容**变了就按 `id` 合并，`updated` 大的胜出；删除不传播 —— 单机单人的场景下，这比加锁便宜得多。这里刻意不用 mtime 判断变化：时间戳分辨率不足时连续两次写会拿到相同 mtime（Windows 上就踩到过），按内容比才可靠。
+- Writes are atomic (tmp + rename), so a crash cannot corrupt the file.
+- A broken file (JSON parse failure) never crashes the plugin: `loadError` is recorded and the tools
+  keep answering.
+- Multiple instances (two dsh windows) each hold an in-memory copy; before writing, a copy re-reads
+  the file, and if the **content** changed it merges by `id` with the newer `updated` winning.
+  Deletions do not propagate — on a single-user machine that is far cheaper than locking. Content is
+  compared deliberately instead of mtime: timestamp resolution can be too coarse for two consecutive
+  writes to differ (this actually happened on Windows CI).
 
 ---
 
-## 六、已知边界
+## 6. Known limits
 
-1. **索引不是实时的**：本会话里 `memory save` 写进去的东西，要等宿主重新装配上下文才可能出现在索引里（通常要新开一轮/新会话）；当前会话直接用 `memory search` 读，别等索引。同理，本会话自己的进度条目被排除在索引外 —— 这是刻意的（见第一节约束 3）。
-2. **只记本机会话**：不跨机器同步。想同步就把 `memory.json` 放进自己的同步盘，并把 `dir` 指过去。
-3. **中文检索按二字组**：够用但不是分词，太短的查询（一个字）会命中偏多。
-4. **索引是摘要**：故意只放一行一条。凭索引猜细节是这类插件最常见的误用 —— 工具描述里已经写明「索引只是摘要，要细节就 search」。
-5. **改完代码要重载**：`plugin_manager set_plugin target="include:dsh-memory" enabled=false` 再 `true`（只改 `lib/*.js` 的话，热重载不会自己发生；ESM 模块有缓存）。
+1. **The index is not live.** An entry saved with `memory save` during a session only appears in the
+   index once the host reassembles context (usually a new turn/session). Read it with `memory search`
+   now instead of waiting. Progress notes from the current session are excluded on purpose (see
+   constraint 3 in §1).
+2. **Local machine only.** No cross-machine sync. Put `memory.json` on your own synced folder and
+   point `dir` at it if you want that.
+3. **Chinese search uses bigrams.** Good enough, but not real segmentation; one-character queries
+   will over-match.
+4. **The index is a summary.** Guessing details from it is the most common misuse of this kind of
+   plugin — the tool description itself says "the index is a summary, search for details".
+5. **Reload after code changes.** `plugin_manager set_plugin target="include:dsh-memory"
+   enabled=false` then `true` (editing `lib/*.js` does not hot-reload — ESM caches modules).
 
 ---
 
-## 七、开发
+## 7. Development
 
 ```bash
-node test/store.test.mjs      # 17 个用例，约 100ms
+node test/store.test.mjs      # 17 cases, ~100 ms
 ```
 
-> 别用 `node --test`：本机沙箱下 `node:test` 默认走 pipe 子进程，会 `spawn EPERM`。
+> Do not use `node --test` here: under the local sandbox `node:test` spawns piped child processes
+> and fails with `spawn EPERM`.
 
-- `lib/store.js` —— 纯逻辑，零宿主依赖（可脱离 DSH 单测）。
-- `lib/index.js` —— Host 侧：注入 + 工具 + 自动捕获。`@deepseek-ai/dsh-tools` 只能由 DSH Host 进程解析，纯 node 进程 import 不了，所以测试只覆盖 store。
-- `tools/session-stats.mjs` —— 解压 `~/.dsh/sessions/` 下的多帧 zstd 日志，统计各会话的回合数与上下文追加次数（本文第一节那些实测数据就是它跑出来的）。
-
----
-
-## 八、延伸阅读
-
-- [给 DeepSeek Harness 做一层跨工作区记忆](./docs/blog-cross-workspace-memory.md) —— 完整的过程记录：怎么用会话日志证伪「换工作区就丢缓存」、注入位置为什么决定生死、6 个踩过的坑、以及发布时撞的三个钉子。
+- `lib/store.js` — pure logic, zero host dependencies (unit-testable outside DSH).
+- `lib/index.js` — host side: injection + tool + auto-capture. `@deepseek-ai/dsh-tools` is resolved
+  by the DSH host process only, so tests cover `store` alone.
+- `tools/session-stats.mjs` — decompresses the multi-frame zstd session logs under `~/.dsh/sessions/`
+  and counts turns plus context re-appends (the numbers in §1 come from it).
 
 ---
 
-## 九、许可
+## 8. Further reading
+
+- [Building a cross-workspace memory layer for DeepSeek Harness](./docs/blog-cross-workspace-memory.md)
+  — the full story: falsifying "a new workspace loses the cache" with session logs, why the
+  injection point decides everything, six pitfalls, and three nails hit while publishing. *(Chinese.)*
+
+---
+
+## 9. License
 
 [MIT](./LICENSE) © 2026 Urtaome0211
 
-选它的理由很实际：这是个零依赖、几十 KB 的小工具，MIT 是 DSH 插件生态里最常见、也最不给人添麻烦的选择——随便商用、随便改、闭源再分发都行，只要保留版权声明；真有人想把它并进 GPL 项目，也仍然兼容。如果要拿去做什么，不用先问我。
+The reasoning is practical: this is a zero-dependency tool a few dozen kilobytes in size, and MIT is
+the most common, least demanding choice in the DSH plugin ecosystem — commercial use, forks and even
+closed-source redistribution are fine as long as the notice stays; it also stays compatible if
+someone folds it into a GPL project. No need to ask before using it.
 
-## 十、贡献
+## 10. Contributing
 
-欢迎提 issue 和 PR。两条硬约束请先看一眼，它们不是风格偏好，是设计的根：
+Issues and PRs are welcome. Two hard constraints are not style preferences — they are the root of
+the design:
 
-1. **不许把注入挪到系统提示词或用户消息前**——前缀一变，prompt 缓存全废，插件存在的意义就没了。
-2. **注入文本必须逐字节确定**（绝对日期、稳定排序、排除本会话自己写的内容）。这条靠单测兜着：`test/store.test.mjs` 里有「两次渲染完全相同」和「不含相对时间措辞」两个用例，改 `renderIndex` 时它们会先叫。
+1. **Never move the injection into the system prompt or ahead of user messages** — change the prefix
+   and the whole prompt cache is void, which removes the reason this plugin exists.
+2. **Injected text must be byte-for-byte deterministic** (absolute dates, stable ordering, excluding
+   what the current session just wrote). Unit tests guard this: `test/store.test.mjs` has "renders
+   identically twice" and "contains no relative-time wording"; they will complain first when you
+   touch `renderIndex`.
