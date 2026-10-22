@@ -1,6 +1,6 @@
 {
   "name": "dsh-cross-workspace-memory",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Cross-workspace long-term memory for DeepSeek Harness: one machine-local store shared by every workspace, a compact index injected at session start, and a searchable tool for the details.",
   "keywords": [
     "dsh",

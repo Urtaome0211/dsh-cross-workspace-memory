@@ -100,7 +100,7 @@ plugin_manager install_bundle  target = dsh-cross-workspace-memory
 node test/store.test.mjs      # 17 pass / 0 fail
 npm pack                      # → dsh-cross-workspace-memory-<version>.tgz（10 个文件，约 42 kB）
 # 校验：解包后在 package/ 里再跑一次测试，确认 tarball 自包含
-tar -xzf dsh-cross-workspace-memory-0.1.1.tgz -C /tmp/x && (cd /tmp/x/package && node test/store.test.mjs)
+tar -xzf dsh-cross-workspace-memory-0.1.2.tgz -C /tmp/x && (cd /tmp/x/package && node test/store.test.mjs)
 
 npm publish --dry-run         # 先看清单
 npm publish                   # 本包 unscoped，默认 public；registry 为官方源

@@ -122,7 +122,7 @@ upgrading from the old name replaces it in place; config and memory files are un
 node test/store.test.mjs      # 17 pass / 0 fail
 npm pack                      # → dsh-cross-workspace-memory-<version>.tgz
 # verify: unpack and run the tests inside package/ to prove the tarball is self-contained
-tar -xzf dsh-cross-workspace-memory-0.1.1.tgz -C /tmp/x && (cd /tmp/x/package && node test/store.test.mjs)
+tar -xzf dsh-cross-workspace-memory-0.1.2.tgz -C /tmp/x && (cd /tmp/x/package && node test/store.test.mjs)
 
 npm publish --dry-run         # inspect the file list first
 npm publish                   # unscoped package → public on the default registry
