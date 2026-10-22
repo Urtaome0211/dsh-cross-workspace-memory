@@ -182,7 +182,9 @@ text: () => {
 
 **为什么不用宿主自带的 `storageDomain`？** 它的 `DomainSpec` 要求每张表配一个 **zod** schema，等于给一个零依赖的小插件强塞一个依赖。我改成自己写文件 + 一个 `version` 字段留升级余地。
 
-**多实例怎么办？** 桌面端可能的多个窗口同时写，所以 `load()` 记下 mtime，发现文件被改过就重读、**按 id 合并**（`updated` 大的胜出），并且写盘用 `tmp → rename` 保证原子性。删除不传播——这是有意的保守取舍：宁可多留一条，也不误删别人刚写的。
+**多实例怎么办？** 桌面端可能的多个窗口同时写，所以每次写入前先重读文件，**内容**变了就按 id 合并（`updated` 大的胜出），并且写盘用 `tmp → rename` 保证原子性。删除不传播——这是有意的保守取舍：宁可多留一条，也不误删别人刚写的。
+
+一开始我用的是「比 mtime」，后来 CI 在 Windows 上把这个假设打翻了。时间戳分辨率不足时，连续两次写会拿到**相同**的 mtime，于是「文件没变」的误判就发生了——多实例合并静默失效，不报错、不崩溃，只是数据悄悄不同步。改成比文件内容本身才可靠（细节见 §6 的第二个 bug）。
 
 ### 4.2 注入什么：索引的预算与排序
 
@@ -380,7 +382,7 @@ $ node test/store.test.mjs
 
 还有一个**没有采纳**的反馈值得记：子代理说「诊断里看到的注入文本比实际注入的短/长」。我去读了代码——同一个函数、同一组参数、同一份数据，不可能不一致。这是模型转述时的失真。**二手观测不能当证据，要么看回执原文，要么自己跑一遍。**
 
-## 七、发布这件小事，撞了三个钉子
+## 七、发布这件小事，撞了三个钉子（第三个第二天拔掉了）
 
 开发和验证都过了，剩下「发出去」。结果三个钉子。
 
@@ -422,7 +424,13 @@ We detected unusual activity from your device or network.
 Automated (bot) activity on your network (IP 39.182.76.135)
 ```
 
-这是按出口 IP 的判定，运营商共享 IP 很容易中招。结论：**别在发布这条路上死磕**。`npm pack` 打出来的 21KB tarball 自包含、跨机器可装，已经足够分发；哪天有账号了再 `npm publish` 一行的事。
+这是按出口 IP 的判定，运营商共享 IP 很容易中招。当晚的结论是：**别在发布这条路上死磕**，`npm pack` 打出来的 tarball 自包含、跨机器可装，已经足够分发；哪天有账号了再 `npm publish` 一行的事。
+
+**后记（2026-10-22）：钉子拔掉了。** 第二天换个网络重试，账号建成了（`urtaome`），包已作为 `0.1.0` 发布到 npm：<https://www.npmjs.com/package/dsh-cross-workspace-memory>。那句「哪天有账号了再一行的事」应验了一半——命令确实只有一行，但它撞上了两个新钉子。
+
+**新钉子一：2FA 在无 TTY 环境里是个死胡同。** 账号默认开 `auth-and-writes`，`npm publish` 必须过一次交互式验证；管道里它直接报 `EOTP`，而它打印的浏览器认证链接在无 TTY 时被打码成 `***`（防泄漏），连复制给人代点都做不到。`winpty` 也救不了——这套环境里根本没有控制台可分配（`stdin is not a tty`）。可行的只剩两条：`npm publish --otp=<6位码>`，或者建一个**勾了 Bypass 2FA 的 granular token**。顺带记一笔：网上大量教程还在教「建 Classic → Automation token」，但 classic token 自 2025-11 起已经不能创建、旧 token 也全部吊销了（[公告](https://github.blog/changelog/2025-11-05-npm-security-update-classic-token-creation-disabled-and-granular-token-changes/)）；带 bypass 的 GAT 目前仍能直接发布，npm 计划 2027-01 收掉这个能力，之后要转 trusted publishing / staged publishing。
+
+**新钉子二：新包名首发会先出现一个「占位版本」。** `npm publish` 明明回了 `+ dsh-cross-workspace-memory@0.1.0`，紧接着 `npm view` 看到的却是 `0.0.0-stage`、`latest` 指着它、README 变成一句 "Temporary package placeholder for staged publishing"，`stub: true`。那是 registry 给新包名的占位与审核流程：真实版本过审后自动转正，本例等了约 3 分钟 `0.1.0` 才出现、`latest` 才指过去。中间我一度以为发布失败（甚至去查了 `npm stage list`，队列是空的）——结论是**别在占位版本阶段改版本号重发**，先等，再看 `npm stage list` 有没有待批的 staged release。
 
 ## 八、效果与成本
 
@@ -464,6 +472,6 @@ Automated (bot) activity on your network (IP 39.182.76.135)
 
 ---
 
-**代码**：`plugin/` 目录，`lib/index.js`（360 行）+ `lib/store.js`（444 行）+ `test/store.test.mjs`（184 行）+ `tools/session-stats.mjs`（100 行），MIT。
+**代码**：`lib/index.js`（360 行）+ `lib/store.js`（464 行）+ `test/store.test.mjs`（213 行，17 个用例）+ `tools/session-stats.mjs`（100 行），MIT，<https://github.com/Urtaome0211/dsh-cross-workspace-memory>。
 **安装**：`plugin_manager install_bundle target=dsh-cross-workspace-memory`（或直接指向本地目录 / tarball）。
 **存储**：`~/.dsh/memory/memory.json`——删了不影响插件，复制走就是全部记忆。

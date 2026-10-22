@@ -1,6 +1,8 @@
 # dsh-cross-workspace-memory · 跨工作区长期记忆
 
 [![CI](https://github.com/Urtaome0211/dsh-cross-workspace-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/Urtaome0211/dsh-cross-workspace-memory/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/dsh-cross-workspace-memory.svg)](https://www.npmjs.com/package/dsh-cross-workspace-memory)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-cross-workspace-memory.svg)](https://www.npmjs.com/package/dsh-cross-workspace-memory)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A522.19-brightgreen.svg)](./package.json)
 [![deps](https://img.shields.io/badge/dependencies-0-success.svg)](./package.json)
@@ -80,17 +82,19 @@
 
 ## 三、安装与卸载
 
-三条路，target 就是一个普通的包 spec（内部走 pnpm add + 写 patch）：
+三条路，target 就是一个普通的包 spec（内部走 pnpm add + 写 bundle patch）：
 
 ```bash
-# 1) npm（发布后）
+# 1) 从 npm 装（推荐，联网一条命令）
 plugin_manager install_bundle  target = dsh-cross-workspace-memory
-# 2) tarball（不依赖 registry，适合拷给别人）
+# 2) tarball（不依赖 registry，适合拷给没有外网的人）
 plugin_manager install_bundle  target = D:\dshproject\plugin\dsh-cross-workspace-memory-0.1.0.tgz
 # 3) 本地目录（开发期推荐：改代码重载即生效）
 plugin_manager install_bundle  target = D:\dshproject\plugin
 ```
 
+> 包已发布：<https://www.npmjs.com/package/dsh-cross-workspace-memory> —— `0.1.0` · MIT · 零依赖 · 解包 84.9 kB（9 个文件）。
+>
 > 注意：桌面版的 `desktop` profile 归 Electron app 独占，`dsh plugin --profile desktop add …` 会被拒绝（`profile "desktop" is managed exclusively by the Electron application`），只能走 `plugin_manager`。
 
 装完重启一次 dsh（或新开一个会话）生效：bundle 会把下面这行插进 profile 的 loader 树（`id` 固定为 `dsh-memory`，改名也不变，方便原地升级）。
@@ -113,21 +117,28 @@ plugin_manager install_bundle  target = D:\dshproject\plugin
 ### 打包与分发（维护者）
 
 ```bash
-npm pack                      # → dsh-cross-workspace-memory-0.1.0.tgz（8 个文件，约 21KB）
-# 校验：解包后在 package/ 里跑测试应当 15 pass / 0 fail
+node test/store.test.mjs      # 17 pass / 0 fail
+npm pack                      # → dsh-cross-workspace-memory-<version>.tgz（9 个文件，约 34 kB）
+# 校验：解包后在 package/ 里再跑一次测试，确认 tarball 自包含
 tar -xzf dsh-cross-workspace-memory-0.1.0.tgz -C /tmp/x && (cd /tmp/x/package && node test/store.test.mjs)
 
-npm publish                   # 需先 npm login；本包 unscoped，默认 public 访问
+npm publish --dry-run         # 先看清单
+npm publish                   # 本包 unscoped，默认 public；registry 为官方源
+npm view dsh-cross-workspace-memory version dist.tarball   # 发布后核对
 ```
 
-发布到 GitHub Packages 也行（安装方也需要 token）：
+> **新包名第一次发布会先看到一个占位版本。** registry 会先建 `0.0.0-stage`（packument 里 `stub: true`，README 是 "Temporary package placeholder for staged publishing"），真实版本进入审核，通过后自动转正并把 `latest` 指向它。本例从 `npm publish` 到 `npm view … version` 能查到 `0.1.0` 隔了约 3 分钟，期间只看得到 `0.0.0-stage` —— 别当失败处理，更别急着改版本号重发。若长时间停在占位版，用 `npm stage list` 看有没有待批的 staged release（`npm stage view / approve / reject <stage-id>`）。
+
+发版顺序建议：改 `package.json` 的 `version` → 更新本节数字与 CHANGELOG（如有）→ 测试 → `npm publish` → `git tag vX.Y.Z && git push --tags`。`readme` 会随包一起发布到 npm 页面，所以**先改 README 再 publish**，否则 npm 上看到的是旧文案（npm 不允许覆盖已发布版本，改文案得再发一个补丁版本）。
+
+> **2FA 会让无 TTY 的发布直接失败。** 账号开了两步验证（`auth-and-writes`）时，`npm publish` 必须过一次交互式验证：在真终端里它打印认证链接或提示输入 6 位码；在 CI / 管道里则直接报 `EOTP`，而且链接会被打码成 `***`（防泄漏），连复制出来代点都做不到。两条可行路：`npm publish --otp=<6位码>`，或者建一个**勾了 Bypass 2FA 的 granular token**（注意：classic token 自 2025-11 起已不能创建、旧 token 已全部吊销；带 bypass 的 GAT 目前仍能直接发布，npm 计划 2027-01 收回这个能力，之后应改用 trusted publishing / staged publishing）。
+
+也能发布到 GitHub Packages（只作镜像，安装方同样需要 token）：
 
 ```bash
-# 包名改为 @<github账号>/dsh-cross-workspace-memory 后
+# 包名需改为 @<github账号>/dsh-cross-workspace-memory
 npm publish --registry=https://npm.pkg.github.com
 ```
-
-> 若 npm 注册被 "We detected unusual activity" 拦下，那是按出口 IP 判定的反机器人策略（运营商共享 IP 常见）；换手机热点、关掉代理、或等一天再试。不发布也不影响使用 —— 直接分发 .tgz 即可。
 
 ---
 
@@ -170,7 +181,7 @@ npm publish --registry=https://npm.pkg.github.com
 
 - 写入是 tmp + rename 的原子替换，不会写坏。
 - 文件坏了（JSON 解析失败）不会让插件崩：`loadError` 记下来，工具照常回话。
-- 多实例（同时开两个 dsh）各自持有内存副本，落盘前按 `mtime` 变化重读并按 `id` 合并，`updated` 大的胜出；删除不传播 —— 单机单人的场景下，这比加锁便宜得多。
+- 多实例（同时开两个 dsh）各自持有内存副本，下次写入前先重读文件，**内容**变了就按 `id` 合并，`updated` 大的胜出；删除不传播 —— 单机单人的场景下，这比加锁便宜得多。这里刻意不用 mtime 判断变化：时间戳分辨率不足时连续两次写会拿到相同 mtime（Windows 上就踩到过），按内容比才可靠。
 
 ---
 
@@ -187,7 +198,7 @@ npm publish --registry=https://npm.pkg.github.com
 ## 七、开发
 
 ```bash
-node test/store.test.mjs      # 15 个用例，约 100ms
+node test/store.test.mjs      # 17 个用例，约 100ms
 ```
 
 > 别用 `node --test`：本机沙箱下 `node:test` 默认走 pipe 子进程，会 `spawn EPERM`。
