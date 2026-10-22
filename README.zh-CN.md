@@ -82,35 +82,13 @@
 
 ---
 
-## 三、安装与卸载
-
-三条路，target 就是一个普通的包 spec（内部走 pnpm add + 写 bundle patch）：
+## 三、安装
 
 ```bash
-# 1) 从 npm 装（推荐，联网一条命令）
 plugin_manager install_bundle  target = dsh-cross-workspace-memory
-# 2) tarball（不依赖 registry，适合拷给没有外网的人）
-plugin_manager install_bundle  target = D:\dshproject\plugin\dsh-cross-workspace-memory-0.1.1.tgz
-# 3) 本地目录（开发期推荐：改代码重载即生效）
-plugin_manager install_bundle  target = D:\dshproject\plugin
 ```
 
-> 包已发布：<https://www.npmjs.com/package/dsh-cross-workspace-memory> —— `0.1.1` · MIT · 零依赖 · 解包 104.8 kB（10 个文件，含中英文 README）。
->
-> 注意：桌面版的 `desktop` profile 归 Electron app 独占，`dsh plugin --profile desktop add …` 会被拒绝（`profile "desktop" is managed exclusively by the Electron application`），只能走 `plugin_manager`。
-
-装完重启一次 dsh（或新开一个会话）生效：bundle 会把下面这行插进 profile 的 loader 树（`id` 固定为 `dsh-memory`，改名也不变，方便原地升级）。
-
-```yaml
-- insert:
-    - id: dsh-memory
-      name: dsh-cross-workspace-memory
-      config: {}
-```
-
-也可以不用 bundle，直接手改 `~/.dsh/profiles/<profile>/cordis.patch.yml` 加同样一行。
-
-卸载：`plugin_manager remove_bundle  target = dsh-cross-workspace-memory`。记忆文件不会被删（在 `~/.dsh/memory/` 下，想清就自己删）。
+从 npm 拉包。装完新开一个会话，索引就会出现在开头。
 
 ### 为什么包名叫 `dsh-cross-workspace-memory`
 

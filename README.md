@@ -101,39 +101,13 @@ written explicitly with `memory save` — only the model on the spot knows them.
 
 ---
 
-## 3. Install and uninstall
-
-Three routes; `target` is an ordinary package spec (internally `pnpm add` + a bundle patch):
+## 3. Install
 
 ```bash
-# 1) from npm (recommended, one command)
 plugin_manager install_bundle  target = dsh-cross-workspace-memory
-# 2) from a tarball (no registry needed — handy for offline machines)
-plugin_manager install_bundle  target = D:\dshproject\plugin\dsh-cross-workspace-memory-0.1.1.tgz
-# 3) from a local directory (best while developing: edit, reload, done)
-plugin_manager install_bundle  target = D:\dshproject\plugin
 ```
 
-> Published: <https://www.npmjs.com/package/dsh-cross-workspace-memory> — MIT, zero dependencies.
->
-> Note: the desktop app owns the `desktop` profile, so `dsh plugin --profile desktop add …` is
-> rejected (`profile "desktop" is managed exclusively by the Electron application`). Use
-> `plugin_manager` instead.
-
-Restart dsh once (or open a new session) for it to take effect. The bundle inserts this line into
-the profile's loader tree (the `id` stays `dsh-memory` forever, so renames upgrade in place):
-
-```yaml
-- insert:
-    - id: dsh-memory
-      name: dsh-cross-workspace-memory
-      config: {}
-```
-
-You can also skip the bundle and add that line to `~/.dsh/profiles/<profile>/cordis.patch.yml`.
-
-Uninstall: `plugin_manager remove_bundle  target = dsh-cross-workspace-memory`. Your memory file is
-**not** deleted (it lives in `~/.dsh/memory/` — remove it yourself if you want).
+That fetches the package from npm. Open a new session and the index shows up at the top.
 
 ### Why the package is named `dsh-cross-workspace-memory`
 
